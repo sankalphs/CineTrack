@@ -175,36 +175,6 @@ CineTrack/
 └── __pycache__/          # Python cache files
 ```
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 TODO / Roadmap
-
-- [ ] Add user authentication security enhancements
-- [ ] Implement movie rating system
-- [ ] Add movie poster image support  
-- [ ] Create mobile-responsive web version
-- [ ] Add recommendation engine
-- [ ] Implement advanced filtering options
-- [ ] Add movie trailer integration
-- [ ] Create data backup/restore functionality
-
-## 🐛 Known Issues
-
-- Database connection needs to be configured manually
-- No built-in user password encryption (development version)
-- CSV import requires specific format matching
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 👨‍💻 Author
 
