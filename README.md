@@ -3,11 +3,9 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0+-orange.svg)](https://mysql.com)
 [![CustomTkinter](https://img.shields.io/badge/CustomTkinter-Latest-green.svg)](https://github.com/TomSchimansky/CustomTkinter)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A comprehensive movie tracking and management application with an IMDB-inspired dark theme interface. CineTrack allows users to manage movie databases, track watchlists, manage cast and crew information, and much more.
 
-![CineTrack Screenshot](https://via.placeholder.com/800x400/181818/F5C518?text=CineTrack+Interface)
 
 ## ✨ Features
 
@@ -56,7 +54,7 @@ Before running CineTrack, ensure you have:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/CineTrack.git
+git clone https://github.com/sankalphs/CineTrack.git
 cd CineTrack
 ```
 
@@ -69,12 +67,7 @@ pip install customtkinter mysql-connector-python
 
 1. Start your MySQL server
 
-2. Run the setup script:
-```bash
-python setup_database.py
-```
-
-OR manually create the database:
+2. Create the database manually:
 ```bash
 mysql -u root -p < code.sql
 ```
@@ -119,30 +112,13 @@ The application uses a comprehensive MySQL schema with the following main tables
 - **watchlists** - User personal movie lists
 - **donations** - User contribution tracking
 
-## 📦 Sample Data
-
-The `sample_data/` directory contains pre-prepared CSV files to help you get started quickly:
-
-- **`sample_movies.csv`** - Demo movie entries with titles, release dates, and descriptions
-- **`sample_cast.csv`** - Demo cast member profiles with biographies
-- **`README.md`** - Detailed instructions for importing sample data
-
-### Quick Start with Sample Data
-1. Launch CineTrack application
-2. Navigate to the CSV import section
-3. Select and import the sample CSV files
-4. Start exploring with pre-loaded demo content
-
-For detailed CSV format requirements and import instructions, see `sample_data/README.md`.
-
 ## 🎯 Usage Guide
 
 ### Getting Started
 1. **Launch the Application**: Run `python p.py`
 2. **Create Account**: Use the Login page to register
-3. **Import Sample Data**: Use the provided CSV files in `sample_data/` folder for quick setup
-4. **Import Data**: Use CSV import for bulk movie addition
-5. **Explore**: Navigate through Movies, Cast, TV, and other sections
+3. **Import Data**: Use CSV import for bulk movie addition
+4. **Explore**: Navigate through Movies, Cast, TV, and other sections
 
 ### Key Functions
 - **Add Movies**: Click "Add Movie" to input new films
@@ -193,10 +169,6 @@ CineTrack/
 ├── code.sql               # Database schema and setup
 ├── README.md              # Project documentation
 ├── .gitignore            # Git ignore configuration
-├── sample_data/          # Sample CSV data for testing
-│   ├── README.md         # Sample data documentation
-│   ├── sample_movies.csv # Sample movie dataset
-│   └── sample_cast.csv   # Sample cast dataset
 ├── .github/              # GitHub configuration
 │   └── workflows/        # CI/CD workflows
 │       └── ci.yml        # Continuous integration setup
@@ -236,7 +208,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Author
 
+### Author
+
 **Sankalp H S**
+
 - GitHub: [@sankalphs](https://github.com/sankalphs)
 - Project Link: [https://github.com/sankalphs/CineTrack](https://github.com/sankalphs/CineTrack)
 
