@@ -1,3 +1,14 @@
+"""
+CineTrack - Movie Database Management Application
+
+A comprehensive movie tracking and management application with an IMDB-inspired interface.
+Built using CustomTkinter and MySQL for modern desktop experience.
+
+Author: Sankalp H S
+GitHub: https://github.com/sankalphs/CineTrack
+License: MIT
+"""
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox, PhotoImage, filedialog
 import mysql.connector
@@ -6,17 +17,27 @@ import re
 import os
 import datetime
 
+# Set appearance mode and theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")    # IMDB-like effect
 
+# Database configuration - UPDATE THESE VALUES FOR YOUR SETUP
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "password": "qwerty1234",  # CHANGE THIS TO YOUR MYSQL PASSWORD
+    "database": "cinetrack"
+}
+
 # Connect to DB
-conn = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="qwerty1234",
-    database="cinetrack"
-)
-cursor = conn.cursor(buffered=True)
+try:
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor(buffered=True)
+    print("✅ Database connection successful!")
+except mysql.connector.Error as err:
+    print(f"❌ Database connection failed: {err}")
+    print("Please check your database configuration in DB_CONFIG dictionary")
+    exit(1)
 
 # Theme/Style constants
 IMDB_YELLOW = "#F5C518"
@@ -87,6 +108,7 @@ class CineTrackIMDB(ctk.CTk):
             ("Studios", self.show_studios),
             ("Watchlist", self.show_watchlist),
             ("Donations", self.show_donations),
+            ("DB Stats", self.show_database_stats),
         ]
         for txt, fn in nav_items:
             btn = ctk.CTkButton(nav_frame, text=txt, corner_radius=8, font=("Arial", 12, "bold"), fg_color=IMDB_GRAY,
@@ -280,15 +302,29 @@ class CineTrackIMDB(ctk.CTk):
             try:
                 cursor.execute("INSERT INTO users (username, email, password) VALUES (%s,%s,%s)", (uname, email, pwd))
                 conn.commit()
+                
+                # Get the new user ID
+                cursor.execute("SELECT user_id FROM users WHERE username=%s", (uname,))
+                uid = cursor.fetchone()[0]
+                
+                # Verify the trigger worked by checking the welcome donation
+                cursor.execute("SELECT COUNT(*) FROM donations WHERE user_id=%s AND comment='Welcome, user created!'", (uid,))
+                welcome_donation_exists = cursor.fetchone()[0] > 0
+                
+                self.current_user = (uid, uname)
+                self.account_btn.configure(text=uname)
+                dlg.destroy()
+                
+                # Show welcome message including trigger confirmation
+                if welcome_donation_exists:
+                    messagebox.showinfo("Welcome!", f"Account created successfully!\n\n🎉 Welcome to CineTrack, {uname}!\nA welcome donation entry has been automatically created for you.")
+                else:
+                    messagebox.showinfo("Welcome!", f"Account created successfully!\nWelcome to CineTrack, {uname}!")
+                    
             except Exception as e:
                 conn.rollback()
                 status_lbl.configure(text=f'Error: {e}')
                 return
-            cursor.execute("SELECT user_id FROM users WHERE username=%s", (uname,))
-            uid = cursor.fetchone()[0]
-            self.current_user = (uid, uname)
-            self.account_btn.configure(text=uname)
-            dlg.destroy()
 
         btn_frame = ctk.CTkFrame(frame)
         btn_frame.grid(row=4, column=0, columnspan=2, pady=12)
@@ -365,16 +401,29 @@ class CineTrackIMDB(ctk.CTk):
             try:
                 cursor.execute('INSERT INTO users (username, email, password) VALUES (%s,%s,%s)', (uname, email, pwd))
                 conn.commit()
+                
+                # Get the new user ID and verify trigger worked
+                cursor.execute('SELECT user_id FROM users WHERE username=%s', (uname,))
+                uid = cursor.fetchone()[0]
+                
+                # Check if welcome donation was created by trigger
+                cursor.execute("SELECT COUNT(*) FROM donations WHERE user_id=%s AND comment='Welcome, user created!'", (uid,))
+                welcome_donation_exists = cursor.fetchone()[0] > 0
+                
+                self.current_user = (uid, uname)
+                self.account_btn.configure(text=uname)
+                
+                if welcome_donation_exists:
+                    messagebox.showinfo('Welcome!', f'Account created and logged in!\n\n🎉 Welcome to CineTrack, {uname}!\nA welcome donation entry has been automatically created for you.')
+                else:
+                    messagebox.showinfo('Register', 'Account created and logged in')
+                    
+                self.show_home()
+                
             except Exception as e:
                 conn.rollback()
                 messagebox.showerror('DB', f'Failed: {e}')
                 return
-            cursor.execute('SELECT user_id FROM users WHERE username=%s', (uname,))
-            uid = cursor.fetchone()[0]
-            self.current_user = (uid, uname)
-            self.account_btn.configure(text=uname)
-            messagebox.showinfo('Register', 'Account created and logged in')
-            self.show_home()
 
         ctk.CTkButton(reg_col, text='Register', fg_color=IMDB_YELLOW, command=do_register_page, width=140).pack(pady=(8,6))
 
@@ -473,6 +522,22 @@ class CineTrackIMDB(ctk.CTk):
             return
         imdb_heading(self.page, r[0])
         imdb_subheading(self.page, f"Email: {r[1] or 'N/A'}")
+
+        # Get total donations using the database function
+        try:
+            cursor.execute('SELECT total_donations(%s)', (user_id,))
+            total_donations = cursor.fetchone()[0] or 0.00
+            
+            # Create donation info frame
+            donation_frame = ctk.CTkFrame(self.page, fg_color=IMDB_GRAY)
+            donation_frame.pack(anchor='w', padx=20, pady=(8,0))
+            ctk.CTkLabel(donation_frame, 
+                        text=f"💰 Total Donations: ${total_donations:.2f}", 
+                        font=FONT_SUBHEADER, 
+                        text_color=IMDB_YELLOW, 
+                        bg_color=IMDB_GRAY).pack(anchor='w', padx=12, pady=8)
+        except Exception as e:
+            print(f"Error fetching donations: {e}")
 
         # followers / following
         cursor.execute('SELECT u.username FROM user_follow uf JOIN users u ON uf.follower_id=u.user_id WHERE uf.followed_id=%s', (user_id,))
@@ -2065,22 +2130,46 @@ class CineTrackIMDB(ctk.CTk):
         imdb_heading(self.page, "Donations & Support")
         imdb_subheading(self.page, "Support CineTrack — view donors or add a donation")
 
-        # Summary frame
-        summary_frame = ctk.CTkFrame(self.page, fg_color=IMDB_DARK_BG)
-        summary_frame.pack(anchor="w", padx=20, pady=(8,6))
+        # Create scrollable frame for all content
+        main_frame = ctk.CTkFrame(self.page)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Create scrollable frame
+        scrollable_frame = ctk.CTkScrollableFrame(main_frame, 
+                                                 fg_color=IMDB_DARK_BG,
+                                                 scrollbar_button_color=IMDB_YELLOW,
+                                                 scrollbar_button_hover_color=IMDB_GRAY)
+        scrollable_frame.pack(fill='both', expand=True, padx=5, pady=5)
+
+        # Summary frame (now inside scrollable frame)
+        summary_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
+        summary_frame.pack(anchor="w", padx=20, pady=(8,6), fill='x')
 
         cursor.execute("SELECT IFNULL(SUM(donation_amount),0) FROM donations")
         total = cursor.fetchone()[0] or 0.0
-        total_label = ctk.CTkLabel(summary_frame, text=f"Total Donations: {total:.2f}", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG)
+        total_label = ctk.CTkLabel(summary_frame, text=f"Total Donations: ${total:.2f}", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG)
         total_label.pack(anchor='w')
+        
+        # Show trigger statistics
+        cursor.execute("SELECT COUNT(*) FROM donations WHERE comment='Welcome, user created!'")
+        welcome_count = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0] or 0
+        
+        # trigger_stats = ctk.CTkLabel(summary_frame, 
+        #                            text=f"🎯 Auto-Welcome Donations: {welcome_count} (Trigger Success Rate: {(welcome_count/max(total_users,1)*100):.1f}%)", 
+        #                            font=FONT_NORMAL, 
+        #                            text_color='lightgray', 
+        #                            bg_color=IMDB_DARK_BG)
+        # trigger_stats.pack(anchor='w', pady=(4,0))
 
         # Top donors
-        donors_frame = ctk.CTkFrame(self.page, fg_color=IMDB_DARK_BG)
-        donors_frame.pack(fill='both', padx=20, pady=(6,12), expand=False)
+        donors_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
+        donors_frame.pack(fill='x', padx=20, pady=(6,12))
         ctk.CTkLabel(donors_frame, text="Top Donors:", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).pack(anchor='w')
 
         cols = ("User", "Total", "Last Donation", "Comment")
-        tree = ttk.Treeview(donors_frame, columns=cols, show="headings", height=8)
+        tree = ttk.Treeview(donors_frame, columns=cols, show="headings", height=6)
         for col in cols:
             tree.heading(col, text=col)
             # make Comment column wider
@@ -2120,17 +2209,89 @@ class CineTrackIMDB(ctk.CTk):
             recent_comment = r[3] or ''
             tree.insert('', 'end', values=(r[0], f"{r[1]:.2f}", r[2], recent_comment), tags=(tag,))
 
-        # Donation form
-        form_frame = ctk.CTkFrame(self.page, fg_color=IMDB_DARK_BG)
-        form_frame.pack(anchor='w', padx=20, pady=(8,12))
-        ctk.CTkLabel(form_frame, text="Add Donation", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0,6))
-
-        # Username selector (combobox) - list all usernames
+        # Get users list for lookup and donation form
         cursor.execute("SELECT username FROM users ORDER BY username")
         users = [r[0] for r in cursor.fetchall()]
+        
+        # User Donation Lookup section (using total_donations function)
+        lookup_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
+        lookup_frame.pack(anchor='w', padx=20, pady=(8,6), fill='x')
+        ctk.CTkLabel(lookup_frame, text="🔍 Check User's Total Donations", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0,6))
+        
+        ttk.Label(lookup_frame, text="Username:").grid(row=1, column=0, sticky='w', padx=(0,6))
+        lookup_username_cb = ttk.Combobox(lookup_frame, values=users, width=25)
+        lookup_username_cb.grid(row=1, column=1, sticky='w', padx=(0,6))
+        
+        lookup_result_lbl = ctk.CTkLabel(lookup_frame, text="", font=FONT_NORMAL, text_color='white', bg_color=IMDB_DARK_BG)
+        lookup_result_lbl.grid(row=1, column=2, sticky='w', padx=(12,0))
+        
+        def lookup_user_donations():
+            selected_username = lookup_username_cb.get().strip()
+            if not selected_username:
+                lookup_result_lbl.configure(text="Please select a username")
+                return
+            
+            try:
+                # Get user ID
+                cursor.execute("SELECT user_id FROM users WHERE username=%s", (selected_username,))
+                user_result = cursor.fetchone()
+                if not user_result:
+                    lookup_result_lbl.configure(text="User not found")
+                    return
+                
+                user_id = user_result[0]
+                
+                # Use the total_donations database function
+                cursor.execute("SELECT total_donations(%s)", (user_id,))
+                total = cursor.fetchone()[0] or 0.00
+                
+                lookup_result_lbl.configure(text=f"💰 Total: ${total:.2f}", text_color=IMDB_YELLOW)
+                
+            except Exception as e:
+                lookup_result_lbl.configure(text=f"Error: {e}", text_color='red')
+        
+        ctk.CTkButton(lookup_frame, text="Check Total", fg_color=IMDB_YELLOW, command=lookup_user_donations, width=100).grid(row=2, column=0, columnspan=2, pady=(6,0))
+
+        # Recent donations section
+        recent_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
+        recent_frame.pack(anchor='w', padx=20, pady=(6,8), fill='x')
+        ctk.CTkLabel(recent_frame, text="💫 Recent Donations", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).pack(anchor='w', padx=8, pady=(6,4))
+        
+        # Get recent donations (excluding welcome donations)
+        cursor.execute("""
+            SELECT u.username, d.donation_amount, d.donation_date, d.comment
+            FROM donations d
+            JOIN users u ON d.user_id = u.user_id
+            WHERE d.comment != 'Welcome, user created!' OR d.comment IS NULL
+            ORDER BY d.donation_date DESC
+            LIMIT 5
+        """)
+        recent_donations = cursor.fetchall()
+        
+        if recent_donations:
+            for username, amount, date, comment in recent_donations:
+                recent_text = f"• {username}: ${amount:.2f}"
+                if comment and comment != 'Welcome, user created!':
+                    recent_text += f" - \"{comment}\""
+                recent_text += f" ({date.strftime('%Y-%m-%d %H:%M')})"
+                
+                ctk.CTkLabel(recent_frame, text=recent_text, 
+                           font=FONT_NORMAL, text_color='lightgray', 
+                           bg_color=IMDB_DARK_BG).pack(anchor='w', padx=16, pady=1)
+        else:
+            ctk.CTkLabel(recent_frame, text="• No recent donations found", 
+                       font=FONT_NORMAL, text_color='lightgray', 
+                       bg_color=IMDB_DARK_BG).pack(anchor='w', padx=16, pady=4)
+
+        # Donation form
+        form_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
+        form_frame.pack(anchor='w', padx=20, pady=(8,12), fill='x')
+        ctk.CTkLabel(form_frame, text="💝 Make a Donation", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0,6))
+
+        # Username selector (combobox) - already have users list from above
         ttk.Label(form_frame, text="User:").grid(row=1, column=0, sticky='w', padx=(0,6))
         username_cb = ttk.Combobox(form_frame, values=users, width=30)
-        username_cb.grid(row=1, column=1, sticky='w', padx=(0,6))
+        username_cb.grid(row=1, column=1, columnspan=2, sticky='w', padx=(0,6))
         # If a user is logged in, auto-select them and disable the combobox so
         # donations are always performed as the authenticated user.
         if self.current_user:
@@ -2140,58 +2301,116 @@ class CineTrackIMDB(ctk.CTk):
             except Exception:
                 pass
 
-        # Amount entry
+        # Amount entry with preset buttons
         ttk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky='w', padx=(0,6), pady=(6,0))
-        amount_entry = ctk.CTkEntry(form_frame, width=180, placeholder_text="0.00", font=FONT_NORMAL)
+        amount_entry = ctk.CTkEntry(form_frame, width=180, placeholder_text="Enter amount", font=FONT_NORMAL)
         amount_entry.grid(row=2, column=1, sticky='w', padx=(0,6), pady=(6,0))
+        
+        # Preset amount buttons
+        preset_frame = ctk.CTkFrame(form_frame, fg_color=IMDB_GRAY)
+        preset_frame.grid(row=3, column=0, columnspan=4, sticky='w', pady=(6,0), padx=(0,6))
+        ctk.CTkLabel(preset_frame, text="Quick Amounts:", font=FONT_NORMAL, text_color='white', bg_color=IMDB_GRAY).pack(anchor='w', padx=8, pady=(4,2))
+        
+        preset_amounts = [5.00, 10.00, 25.00, 50.00, 100.00]
+        preset_btn_frame = ctk.CTkFrame(preset_frame, fg_color=IMDB_GRAY)
+        preset_btn_frame.pack(anchor='w', padx=8, pady=(0,6))
+        
+        def set_amount(amount):
+            amount_entry.delete(0, 'end')
+            amount_entry.insert(0, f"{amount:.2f}")
+        
+        for amount in preset_amounts:
+            ctk.CTkButton(preset_btn_frame, text=f"${amount:.0f}", 
+                         fg_color=IMDB_YELLOW, 
+                         text_color='black',
+                         command=lambda a=amount: set_amount(a), 
+                         width=60, height=25).pack(side='left', padx=2)
 
         # Comment entry
-        ttk.Label(form_frame, text="Comment:").grid(row=3, column=0, sticky='w', padx=(0,6), pady=(6,0))
-        comment_entry = ctk.CTkEntry(form_frame, width=420, placeholder_text="Optional message", font=FONT_NORMAL)
-        comment_entry.grid(row=3, column=1, columnspan=2, sticky='w', pady=(6,0))
+        ttk.Label(form_frame, text="Comment:").grid(row=4, column=0, sticky='w', padx=(0,6), pady=(6,0))
+        comment_entry = ctk.CTkEntry(form_frame, width=420, placeholder_text="Optional message (e.g., 'Supporting great content!')", font=FONT_NORMAL)
+        comment_entry.grid(row=4, column=1, columnspan=3, sticky='w', pady=(6,0))
 
-        donate_btn = ctk.CTkButton(form_frame, text="Donate", fg_color=IMDB_YELLOW, width=140)
-        donate_btn.grid(row=4, column=0, columnspan=2, pady=(10,0))
+        # Donation button with enhanced styling
+        donate_btn = ctk.CTkButton(form_frame, text="💝 Make Donation", fg_color=IMDB_YELLOW, text_color='black', width=160, height=35, font=FONT_SUBHEADER)
+        donate_btn.grid(row=5, column=0, columnspan=2, pady=(12,0))
 
         def submit_donation():
             # Donation must be from a logged-in user
             if not self.current_user:
-                messagebox.showerror('Auth', 'Please login to make a donation.')
+                messagebox.showerror('Authentication Required', 'Please login to make a donation.')
                 return
+                
             amt_text = amount_entry.get().strip()
             comment = comment_entry.get().strip() or None
+            
+            # Enhanced amount validation
             if not amt_text:
-                messagebox.showerror("Input Error", "Please enter an amount.")
+                messagebox.showerror("Amount Required", "Please enter a donation amount.")
+                amount_entry.focus()
                 return
+                
             try:
                 amt = float(amt_text)
                 if amt <= 0:
-                    raise ValueError()
-            except Exception:
-                messagebox.showerror("Input Error", "Enter a valid positive amount.")
+                    raise ValueError("Amount must be positive")
+                if amt > 10000:  # Set a reasonable maximum
+                    result = messagebox.askyesno("Large Donation", f"You're donating ${amt:.2f}. Are you sure this is correct?")
+                    if not result:
+                        return
+            except ValueError:
+                messagebox.showerror("Invalid Amount", "Please enter a valid positive number (e.g., 25.00)")
+                amount_entry.focus()
                 return
+
             uid = self.current_user[0]
 
             try:
                 cursor.execute("INSERT INTO donations (user_id, donation_amount, comment) VALUES (%s,%s,%s)", (uid, amt, comment))
                 conn.commit()
+                
+                # Show success with amount
+                if comment:
+                    messagebox.showinfo("Thank You! 🎉", f"Your donation of ${amt:.2f} has been recorded successfully!\n\nComment: '{comment}'\n\nThank you for supporting CineTrack!")
+                else:
+                    messagebox.showinfo("Thank You! 🎉", f"Your donation of ${amt:.2f} has been recorded successfully!\n\nThank you for supporting CineTrack!")
+                
             except Exception as e:
                 conn.rollback()
-                messagebox.showerror("DB Error", f"Failed to save donation: {e}")
+                messagebox.showerror("Database Error", f"Failed to save donation: {str(e)}")
                 return
 
-            messagebox.showinfo("Thank you!", "Donation recorded successfully.")
+            # Clear form
+            amount_entry.delete(0, 'end')
+            comment_entry.delete(0, 'end')
 
-            # refresh totals and donor list
+            # Refresh totals and donor list with complete data including comments
             cursor.execute("SELECT IFNULL(SUM(donation_amount),0) FROM donations")
             new_total = cursor.fetchone()[0] or 0.0
-            total_label.configure(text=f"Total Donations: {new_total:.2f}")
+            total_label.configure(text=f"Total Donations: ${new_total:.2f}")
 
+            # Update trigger stats
+            cursor.execute("SELECT COUNT(*) FROM donations WHERE comment='Welcome, user created!'")
+            welcome_count = cursor.fetchone()[0] or 0
+            cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = cursor.fetchone()[0] or 0
+            trigger_stats.configure(text=f"🎯 Auto-Welcome Donations: {welcome_count} (Trigger Success Rate: {(welcome_count/max(total_users,1)*100):.1f}%)")
+
+            # Refresh donor list
             for iid in tree.get_children():
                 tree.delete(iid)
             cursor.execute(
                 """
-                SELECT u.username, IFNULL(SUM(d.donation_amount),0) AS total, MAX(d.donation_date)
+                SELECT u.username,
+                       IFNULL(SUM(d.donation_amount),0) AS total,
+                       MAX(d.donation_date) AS last_date,
+                       (
+                           SELECT d2.comment
+                           FROM donations d2
+                           WHERE d2.user_id = u.user_id AND d2.comment IS NOT NULL
+                           ORDER BY d2.donation_date DESC
+                           LIMIT 1
+                       ) AS recent_comment
                 FROM donations d
                 JOIN users u ON d.user_id = u.user_id
                 GROUP BY u.user_id
@@ -2202,12 +2421,140 @@ class CineTrackIMDB(ctk.CTk):
             rows = cursor.fetchall()
             for i, r in enumerate(rows):
                 tag = 'even' if i % 2 == 0 else 'odd'
+                recent_comment = r[3] or ''
+                tree.insert('', 'end', values=(r[0], f"${r[1]:.2f}", r[2], recent_comment), tags=(tag,))
                 tree.insert('', 'end', values=(r[0], f"{r[1]:.2f}", r[2]), tags=(tag,))
 
             amount_entry.delete(0, 'end')
             comment_entry.delete(0, 'end')
 
         donate_btn.configure(command=submit_donation)
+
+    def show_database_stats(self):
+        """Display database statistics showcasing the trigger and function features."""
+        self.clear_page()
+        imdb_heading(self.page, "Database Statistics & Features")
+        imdb_subheading(self.page, "Showcasing automatic triggers and custom functions")
+
+        # Main stats frame
+        stats_frame = ctk.CTkFrame(self.page, fg_color=IMDB_DARK_BG)
+        stats_frame.pack(fill='both', padx=20, pady=12, expand=True)
+
+        # Trigger Statistics Section
+        trigger_section = ctk.CTkFrame(stats_frame, fg_color=IMDB_GRAY)
+        trigger_section.pack(fill='x', padx=12, pady=(12,6))
+
+        ctk.CTkLabel(trigger_section, text="🎯 Database Trigger: after_user_insert", 
+                    font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_GRAY).pack(anchor='w', padx=12, pady=(8,4))
+        
+        # Get trigger statistics
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0] or 0
+        
+        cursor.execute("SELECT COUNT(*) FROM donations WHERE comment='Welcome, user created!'")
+        welcome_donations = cursor.fetchone()[0] or 0
+        
+        success_rate = (welcome_donations / max(total_users, 1)) * 100
+        
+        ctk.CTkLabel(trigger_section, 
+                    text=f"• Total Users: {total_users}", 
+                    font=FONT_NORMAL, text_color='white', bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=2)
+        
+        ctk.CTkLabel(trigger_section, 
+                    text=f"• Welcome Donations Created: {welcome_donations}", 
+                    font=FONT_NORMAL, text_color='white', bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=2)
+        
+        ctk.CTkLabel(trigger_section, 
+                    text=f"• Trigger Success Rate: {success_rate:.1f}%", 
+                    font=FONT_NORMAL, text_color=IMDB_YELLOW if success_rate >= 95 else 'orange', 
+                    bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=(2,8))
+
+        # Function Demonstration Section
+        function_section = ctk.CTkFrame(stats_frame, fg_color=IMDB_GRAY)
+        function_section.pack(fill='x', padx=12, pady=6)
+
+        ctk.CTkLabel(function_section, text="🔧 Database Function: total_donations(uid)", 
+                    font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_GRAY).pack(anchor='w', padx=12, pady=(8,4))
+
+        # Top donors using the function
+        cursor.execute("""
+            SELECT u.username, u.user_id, total_donations(u.user_id) as total
+            FROM users u
+            WHERE total_donations(u.user_id) > 0
+            ORDER BY total DESC
+            LIMIT 5
+        """)
+        top_donors = cursor.fetchall()
+
+        if top_donors:
+            ctk.CTkLabel(function_section, 
+                        text="• Top 5 Donors (calculated using total_donations function):", 
+                        font=FONT_NORMAL, text_color='white', bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=2)
+            
+            for i, (username, uid, total) in enumerate(top_donors, 1):
+                ctk.CTkLabel(function_section, 
+                            text=f"  {i}. {username}: ${total:.2f}", 
+                            font=FONT_NORMAL, text_color='lightgray', bg_color=IMDB_GRAY).pack(anchor='w', padx=36, pady=1)
+        else:
+            ctk.CTkLabel(function_section, 
+                        text="• No donations found (function returns 0.00 for all users)", 
+                        font=FONT_NORMAL, text_color='lightgray', bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=2)
+
+        # Function test area
+        test_frame = ctk.CTkFrame(function_section, fg_color=IMDB_DARK_BG)
+        test_frame.pack(fill='x', padx=12, pady=(8,12))
+
+        ctk.CTkLabel(test_frame, text="Test total_donations() function:", 
+                    font=FONT_NORMAL, text_color='white', bg_color=IMDB_DARK_BG).grid(row=0, column=0, sticky='w', pady=(4,2))
+
+        # Get all users for testing
+        cursor.execute("SELECT user_id, username FROM users ORDER BY username")
+        all_users = cursor.fetchall()
+        user_options = [f"{username} (ID: {uid})" for uid, username in all_users]
+
+        test_user_cb = ttk.Combobox(test_frame, values=user_options, width=30)
+        test_user_cb.grid(row=1, column=0, sticky='w', padx=(0,6))
+
+        test_result_lbl = ctk.CTkLabel(test_frame, text="", font=FONT_NORMAL, text_color='white', bg_color=IMDB_DARK_BG)
+        test_result_lbl.grid(row=1, column=1, sticky='w', padx=(12,0))
+
+        def test_function():
+            selection = test_user_cb.get()
+            if not selection:
+                test_result_lbl.configure(text="Please select a user", text_color='orange')
+                return
+            
+            # Extract user ID from selection
+            try:
+                uid = int(selection.split("ID: ")[1].split(")")[0])
+                cursor.execute("SELECT total_donations(%s)", (uid,))
+                result = cursor.fetchone()[0] or 0.00
+                test_result_lbl.configure(text=f"Function result: ${result:.2f}", text_color=IMDB_YELLOW)
+            except Exception as e:
+                test_result_lbl.configure(text=f"Error: {e}", text_color='red')
+
+        ctk.CTkButton(test_frame, text="Test Function", fg_color=IMDB_YELLOW, command=test_function, width=120).grid(row=2, column=0, pady=(6,4))
+
+        # Overall database stats
+        overall_section = ctk.CTkFrame(stats_frame, fg_color=IMDB_GRAY)
+        overall_section.pack(fill='x', padx=12, pady=(6,12))
+
+        ctk.CTkLabel(overall_section, text="📊 Overall Database Statistics", 
+                    font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_GRAY).pack(anchor='w', padx=12, pady=(8,4))
+
+        # Calculate various stats
+        cursor.execute("SELECT COUNT(*) FROM movies")
+        total_movies = cursor.fetchone()[0] or 0
+        
+        cursor.execute("SELECT COUNT(*) FROM donations")
+        total_donations_count = cursor.fetchone()[0] or 0
+        
+        cursor.execute("SELECT IFNULL(SUM(donation_amount), 0) FROM donations")
+        total_donation_amount = cursor.fetchone()[0] or 0.00
+
+        stats_text = f"• Movies: {total_movies} | Users: {total_users} | Donations: {total_donations_count} | Total Amount: ${total_donation_amount:.2f}"
+        ctk.CTkLabel(overall_section, text=stats_text, 
+                    font=FONT_NORMAL, text_color='white', bg_color=IMDB_GRAY).pack(anchor='w', padx=24, pady=(2,8))
 
     def on_closing(self):
         cursor.close()
