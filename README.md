@@ -178,7 +178,7 @@ CineTrack/
 
 **Sandhyarani M**
 
-- GitHub: [@sandhya-6360](https://github.com/ssandhya-6360)
+- GitHub: [@sandhya-6360](https://github.com/sandhya-6360)
 
 ## 🙏 Acknowledgments
 
