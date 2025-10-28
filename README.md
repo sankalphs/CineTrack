@@ -153,13 +153,6 @@ conn = mysql.connector.connect(
 )
 ```
 
-### Theme Customization
-Modify theme constants in `p.py`:
-```python
-IMDB_YELLOW = "#F5C518"    # Accent color
-IMDB_DARK_BG = "#181818"   # Background color
-IMDB_GRAY = "#232323"      # Secondary background
-```
 
 ## 📁 Project Structure
 
@@ -176,14 +169,16 @@ CineTrack/
 ```
 
 
-## 👨‍💻 Author
+## 👨‍💻 Authors
 
-### Author
 
 **Sankalp H S**
 
 - GitHub: [@sankalphs](https://github.com/sankalphs)
-- Project Link: [https://github.com/sankalphs/CineTrack](https://github.com/sankalphs/CineTrack)
+
+**Sandhyarani M**
+
+- GitHub: [@sandhya-6360](https://github.com/ssandhya-6360)
 
 ## 🙏 Acknowledgments
 

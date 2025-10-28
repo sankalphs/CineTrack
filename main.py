@@ -25,7 +25,7 @@ ctk.set_default_color_theme("dark-blue")    # IMDB-like effect
 DB_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "qwerty1234",  # CHANGE THIS TO YOUR MYSQL PASSWORD
+    "password": "qwerty1234",  
     "database": "cinetrack"
 }
 
