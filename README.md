@@ -72,7 +72,7 @@ pip install customtkinter mysql-connector-python
 mysql -u root -p < code.sql
 ```
 
-3. Update database credentials in `p.py`:
+3. Update database credentials in `main.py`:
 ```python
 DB_CONFIG = {
     "host": "localhost",
@@ -158,7 +158,7 @@ conn = mysql.connector.connect(
 
 ```
 CineTrack/
-├── p.py                    # Main application file
+├── main.py                    # Main application file
 ├── code.sql               # Database schema and setup
 ├── README.md              # Project documentation
 ├── .gitignore            # Git ignore configuration
