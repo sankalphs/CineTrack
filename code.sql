@@ -154,65 +154,6 @@ CREATE TABLE donations (
     comment TEXT,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
-DELIMITER $$
-CREATE TRIGGER after_user_insert
-AFTER INSERT ON users
-FOR EACH ROW
-BEGIN
-    INSERT INTO donations (user_id, donation_amount, comment)
-    VALUES (NEW.user_id, 0.00, 'Welcome, user created!');
-END$$
-DELIMITER ;
-CREATE TABLE ratings_audit (
-    audit_id INT AUTO_INCREMENT PRIMARY KEY,
-    review_id INT,
-    old_rating DECIMAL(2,1),
-    new_rating DECIMAL(2,1),
-    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-DELIMITER $$
-CREATE TRIGGER before_rating_update
-BEFORE UPDATE ON reviews_ratings
-FOR EACH ROW
-BEGIN
-    IF OLD.rating <> NEW.rating THEN
-        INSERT INTO ratings_audit (review_id, old_rating, new_rating)
-        VALUES (OLD.review_id, OLD.rating, NEW.rating);
-    END IF;
-END$$
-DELIMITER ;
-DELIMITER $$
-CREATE PROCEDURE add_genre(IN gen_name VARCHAR(50))
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM genres WHERE genre_name = gen_name) THEN
-        INSERT INTO genres (genre_name) VALUES (gen_name);
-    END IF;
-END$$
-DELIMITER ;
-DELIMITER $$
-CREATE PROCEDURE update_studio_country(IN sid INT, IN country_name VARCHAR(50))
-BEGIN
-    UPDATE studios SET country = country_name WHERE studio_id = sid;
-END$$
-DELIMITER ;
-DELIMITER $$
-CREATE FUNCTION total_donations(uid INT)
-RETURNS DECIMAL(10,2)
-DETERMINISTIC
-BEGIN
-    DECLARE total DECIMAL(10,2) DEFAULT 0;
-    SELECT SUM(donation_amount) INTO total FROM donations WHERE user_id = uid;
-    RETURN IFNULL(total,0.00);
-END$$
-DELIMITER ;
-DELIMITER $$
-CREATE FUNCTION calc_age(dob DATE) 
-RETURNS INT
-DETERMINISTIC
-RETURN TIMESTAMPDIFF(YEAR, dob, CURDATE());
-$$
-DELIMITER ;
 
 -- User Watchlists Table
 CREATE TABLE watchlists (
@@ -224,4 +165,58 @@ CREATE TABLE watchlists (
     FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
     UNIQUE KEY unique_watchlist (user_id, movie_id)
 );
+
+CREATE TABLE ratings_audit (
+    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+    review_id INT,
+    old_rating DECIMAL(2,1),
+    new_rating DECIMAL(2,1),
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Trigger: Inserts a welcome donation record when a new user is created
+CREATE TRIGGER after_user_insert
+AFTER INSERT ON users
+FOR EACH ROW
+BEGIN
+    INSERT INTO donations (user_id, donation_amount, comment)
+    VALUES (NEW.user_id, 0.00, 'Welcome, user created!');
+END$$
+
+
+-- Trigger: Audits rating changes in reviews_ratings table
+CREATE TRIGGER before_rating_update
+BEFORE UPDATE ON reviews_ratings
+FOR EACH ROW
+BEGIN
+    IF OLD.rating <> NEW.rating THEN
+        INSERT INTO ratings_audit (review_id, old_rating, new_rating)
+        VALUES (OLD.review_id, OLD.rating, NEW.rating);
+    END IF;
+END$$
+
+-- Procedure: Adds a new genre if it does not already exist
+CREATE PROCEDURE add_genre(IN gen_name VARCHAR(50))
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM genres WHERE genre_name = gen_name) THEN
+        INSERT INTO genres (genre_name) VALUES (gen_name);
+    END IF;
+END$$
+
+-- Function: Returns the total donation amount for a user
+CREATE FUNCTION total_donations(uid INT)
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    DECLARE total DECIMAL(10,2) DEFAULT 0;
+    SELECT SUM(donation_amount) INTO total FROM donations WHERE user_id = uid;
+    RETURN IFNULL(total,0.00);
+END$$
+
+-- Function: Calculates age in years from date of birth
+CREATE FUNCTION calc_age(dob DATE) 
+RETURNS INT
+DETERMINISTIC
+RETURN TIMESTAMPDIFF(YEAR, dob, CURDATE());
+$$
 

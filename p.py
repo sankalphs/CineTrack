@@ -39,6 +39,98 @@ except mysql.connector.Error as err:
     print("Please check your database configuration in DB_CONFIG dictionary")
     exit(1)
 
+
+def _ensure_triggered_tables_and_triggers():
+    """Create minimal support tables and triggers if they don't exist.
+
+    - Creates `donations` and `ratings_audit` tables if missing (non-destructive)
+    - Creates two triggers if they are not present:
+        * after_user_insert: after inserting into `users`, add a welcome donation
+        * before_rating_update: before updating `reviews_ratings`, audit rating changes
+    This function is idempotent and safe to call on startup.
+    """
+    try:
+        # Ensure donations table exists (lightweight schema)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS donations (
+                donation_id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                donation_amount DECIMAL(10,2) DEFAULT 0.00,
+                comment VARCHAR(255),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB
+        ''')
+
+        # Ensure ratings_audit table exists (used by audit trigger & UI)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ratings_audit (
+                audit_id INT AUTO_INCREMENT PRIMARY KEY,
+                review_id INT,
+                old_rating INT,
+                new_rating INT,
+                changed_by INT NULL,
+                changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB
+        ''')
+
+        # Helper to check if a trigger exists in the current schema
+        def trigger_exists(trigger_name):
+            cursor.execute(
+                "SELECT TRIGGER_NAME FROM information_schema.triggers WHERE trigger_schema=%s AND trigger_name=%s",
+                (DB_CONFIG.get('database'), trigger_name)
+            )
+            return cursor.fetchone() is not None
+
+        # Create after_user_insert trigger if missing
+        if not trigger_exists('after_user_insert'):
+            try:
+                cursor.execute('''
+                    CREATE TRIGGER after_user_insert
+                    AFTER INSERT ON users
+                    FOR EACH ROW
+                    BEGIN
+                        INSERT INTO donations (user_id, donation_amount, comment)
+                        VALUES (NEW.user_id, 0.00, 'Welcome, user created!');
+                    END
+                ''')
+            except Exception as e:
+                # Some MySQL setups disallow trigger creation depending on privileges
+                print(f"Warning: could not create trigger after_user_insert: {e}")
+
+        # Create before_rating_update trigger if missing
+        if not trigger_exists('before_rating_update'):
+            try:
+                cursor.execute('''
+                    CREATE TRIGGER before_rating_update
+                    BEFORE UPDATE ON reviews_ratings
+                    FOR EACH ROW
+                    BEGIN
+                        IF OLD.rating <> NEW.rating THEN
+                            INSERT INTO ratings_audit (review_id, old_rating, new_rating)
+                            VALUES (OLD.review_id, OLD.rating, NEW.rating);
+                        END IF;
+                    END
+                ''')
+            except Exception as e:
+                print(f"Warning: could not create trigger before_rating_update: {e}")
+
+        # Commit any successful DDL
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"Warning: error while ensuring triggers/tables: {e}")
+
+
+# Ensure triggers/tables are present (best-effort)
+try:
+    _ensure_triggered_tables_and_triggers()
+except Exception:
+    # non-fatal: continue even if trigger creation failed
+    pass
+
 # Theme/Style constants
 IMDB_YELLOW = "#F5C518"
 IMDB_DARK_BG = "#181818"
@@ -103,6 +195,7 @@ class CineTrackIMDB(ctk.CTk):
             ("Movies", self.show_movies),
             ("Cast", self.show_cast),
             ("TV", self.show_series),
+            ("Add", self.show_add_item),
             ("Login", self.show_account_page),
             ("Users", self.show_users),
             ("Studios", self.show_studios),
@@ -1799,6 +1892,284 @@ class CineTrackIMDB(ctk.CTk):
             tag = 'even' if i % 2 == 0 else 'odd'
             tree.insert('', 'end', values=er, tags=(tag,))
 
+    # ========== ADD MOVIE / SERIES (No login required) ==========
+    def show_add_item(self):
+        """Show a form that allows adding a Movie or a Series without requiring login.
+
+        The form inserts into `movies` and optionally `episodes` and `movie_genre`.
+        """
+        self.clear_page()
+        imdb_heading(self.page, "Add Movie or Series")
+        imdb_subheading(self.page, "You can add a movie or create a series and its first episode. No login required.")
+
+        form = ctk.CTkFrame(self.page)
+        form.pack(padx=20, pady=12, anchor='nw')
+
+        ctk.CTkLabel(form, text='Type:').grid(row=0, column=0, sticky='w')
+        type_var = ctk.StringVar(value='movie')
+        type_menu = ctk.CTkOptionMenu(form, values=['movie', 'series'], variable=type_var, width=160)
+        type_menu.grid(row=0, column=1, padx=8, pady=6)
+
+        ctk.CTkLabel(form, text='Title:').grid(row=1, column=0, sticky='w')
+        title_e = ctk.CTkEntry(form, width=420)
+        title_e.grid(row=1, column=1, columnspan=2, pady=6)
+
+        ctk.CTkLabel(form, text='Release Date (YYYY-MM-DD or YYYY):').grid(row=2, column=0, sticky='w')
+        date_e = ctk.CTkEntry(form, width=240)
+        date_e.grid(row=2, column=1, pady=6, sticky='w')
+
+        ctk.CTkLabel(form, text='Language:').grid(row=3, column=0, sticky='w')
+        lang_e = ctk.CTkEntry(form, width=200)
+        lang_e.grid(row=3, column=1, pady=6, sticky='w')
+
+        ctk.CTkLabel(form, text='Description / Summary:').grid(row=4, column=0, sticky='nw')
+        desc_e = ctk.CTkTextbox(form, width=560, height=120)
+        desc_e.grid(row=4, column=1, columnspan=2, pady=6)
+
+        # Genres dropdown populated from DB with an option to add a new genre
+        ctk.CTkLabel(form, text='Genre:').grid(row=5, column=0, sticky='w')
+        # fetch genres
+        genres = []
+        try:
+            cursor.execute('SELECT genre_name FROM genres ORDER BY genre_name')
+            genres = [r[0] for r in cursor.fetchall() if r and r[0]]
+        except Exception:
+            genres = []
+        genre_values = ['(none)'] + genres + ['Add New...']
+        genre_var = ctk.StringVar(value='(none)')
+        genre_menu = ctk.CTkOptionMenu(form, values=genre_values, variable=genre_var, width=260)
+        genre_menu.grid(row=5, column=1, pady=6, sticky='w')
+        new_genre_e = ctk.CTkEntry(form, width=260)
+        # initially hidden
+        new_genre_e.grid(row=5, column=2, padx=8, sticky='w')
+
+        def on_genre_change(choice):
+            if choice == 'Add New...':
+                new_genre_e.configure(state='normal')
+            else:
+                try:
+                    new_genre_e.delete(0, 'end')
+                except Exception:
+                    pass
+                new_genre_e.configure(state='disabled')
+
+        try:
+            genre_menu.configure(command=on_genre_change)
+        except Exception:
+            # fallback: some versions do not accept command param
+            pass
+
+        # Cast (comma-separated)
+        ctk.CTkLabel(form, text='Cast (comma-separated names):').grid(row=6, column=0, sticky='w')
+        cast_e = ctk.CTkEntry(form, width=560)
+        cast_e.grid(row=6, column=1, columnspan=2, pady=6, sticky='w')
+
+        # Series-only fields
+        ctk.CTkLabel(form, text='Season (series only):').grid(row=7, column=0, sticky='w')
+        season_e = ctk.CTkEntry(form, width=120)
+        season_e.grid(row=7, column=1, sticky='w')
+
+        ctk.CTkLabel(form, text='Episode Number (series only):').grid(row=8, column=0, sticky='w')
+        epnum_e = ctk.CTkEntry(form, width=120)
+        epnum_e.grid(row=8, column=1, sticky='w')
+
+        ctk.CTkLabel(form, text='Episode Title (series only):').grid(row=9, column=0, sticky='w')
+        eptitle_e = ctk.CTkEntry(form, width=360)
+        eptitle_e.grid(row=9, column=1, pady=6, sticky='w')
+
+        # Distribution fields available for all entries
+        ctk.CTkLabel(form, text='Distribution - Studio:').grid(row=10, column=0, sticky='w')
+        studio_e = ctk.CTkEntry(form, width=260)
+        studio_e.grid(row=10, column=1, sticky='w')
+        ctk.CTkLabel(form, text='Platform:').grid(row=10, column=2, sticky='w')
+        platform_e = ctk.CTkEntry(form, width=220)
+        platform_e.grid(row=10, column=3, sticky='w')
+        ctk.CTkLabel(form, text='Territory:').grid(row=11, column=0, sticky='w')
+        territory_e = ctk.CTkEntry(form, width=220)
+        territory_e.grid(row=11, column=1, sticky='w')
+        ctk.CTkLabel(form, text='Distribution Date (YYYY-MM-DD or YYYY):').grid(row=11, column=2, sticky='w')
+        distdate_e = ctk.CTkEntry(form, width=220)
+        distdate_e.grid(row=11, column=3, sticky='w')
+
+        status_lbl = ctk.CTkLabel(form, text='', text_color='white')
+        status_lbl.grid(row=12, column=0, columnspan=3, pady=(6, 0))
+
+        def do_add():
+            title = title_e.get().strip()
+            if not title:
+                status_lbl.configure(text='Please enter a title')
+                return
+            rdate = date_e.get().strip() or None
+            # Normalize year-only
+            if rdate and re.fullmatch(r"\d{4}$", rdate):
+                rdate = rdate + "-01-01"
+            lang = lang_e.get().strip() or None
+            desc = desc_e.get('1.0', 'end').strip() or None
+            # determine genres list
+            genres_raw = ''
+            chosen = genre_var.get()
+            if chosen == '(none)':
+                genres_raw = ''
+            elif chosen == 'Add New...':
+                ng = new_genre_e.get().strip()
+                genres_raw = ng if ng else ''
+            else:
+                genres_raw = chosen
+            cast_raw = cast_e.get().strip()
+            # distribution inputs
+            studio_raw = studio_e.get().strip()
+            platform_raw = platform_e.get().strip()
+            territory_raw = territory_e.get().strip()
+            distdate_raw = distdate_e.get().strip() or None
+            typ = type_var.get()
+
+            try:
+                # Insert or reuse movie/series row
+                cursor.execute("SELECT movie_id FROM movies WHERE movie_name=%s AND (release_date=%s OR %s IS NULL)", (title, rdate, rdate))
+                res = cursor.fetchone()
+                if res:
+                    movie_id = res[0]
+                else:
+                    cursor.execute("INSERT INTO movies (movie_name, release_date, language, description) VALUES (%s,%s,%s,%s)", (title, rdate, lang, desc))
+                    movie_id = cursor.lastrowid
+
+                # Handle genres
+                if genres_raw:
+                    parts = [p.strip() for p in re.split(r'[,|;]', genres_raw) if p.strip()]
+                    for g in parts:
+                        cursor.execute("SELECT genre_id FROM genres WHERE genre_name=%s", (g,))
+                        gres = cursor.fetchone()
+                        if gres:
+                            gid = gres[0]
+                        else:
+                            cursor.execute("INSERT INTO genres (genre_name) VALUES (%s)", (g,))
+                            gid = cursor.lastrowid
+                        try:
+                            cursor.execute("INSERT INTO movie_genre (movie_id, genre_id) VALUES (%s,%s)", (movie_id, gid))
+                        except Exception:
+                            pass
+
+                # Handle cast: create cast_members and movie_cast
+                if cast_raw:
+                    cast_parts = [c.strip() for c in re.split(r'[,|;]', cast_raw) if c.strip()]
+                    for actor in cast_parts:
+                        cursor.execute("SELECT cast_id FROM cast_members WHERE name=%s", (actor,))
+                        cres = cursor.fetchone()
+                        if cres:
+                            cid = cres[0]
+                        else:
+                            cursor.execute("INSERT INTO cast_members (name) VALUES (%s)", (actor,))
+                            cid = cursor.lastrowid
+                        # avoid duplicate movie_cast
+                        cursor.execute("SELECT 1 FROM movie_cast WHERE movie_id=%s AND cast_id=%s", (movie_id, cid))
+                        if not cursor.fetchone():
+                            cursor.execute("INSERT INTO movie_cast (movie_id, cast_id) VALUES (%s,%s)", (movie_id, cid))
+
+                # Handle distribution: create studios/platforms and insert into movie_distribution and movie_platform
+                # Normalize distribution date
+                if distdate_raw and re.fullmatch(r"\d{4}$", distdate_raw):
+                    distdate_norm = distdate_raw + "-01-01"
+                else:
+                    distdate_norm = distdate_raw or None
+                if studio_raw:
+                    cursor.execute("SELECT studio_id FROM studios WHERE studio_name=%s", (studio_raw,))
+                    sres = cursor.fetchone()
+                    if sres:
+                        sid = sres[0]
+                    else:
+                        cursor.execute("INSERT INTO studios (studio_name) VALUES (%s)", (studio_raw,))
+                        sid = cursor.lastrowid
+                    # movie_studio junction
+                    cursor.execute("SELECT 1 FROM movie_studio WHERE movie_id=%s AND studio_id=%s", (movie_id, sid))
+                    if not cursor.fetchone():
+                        cursor.execute("INSERT INTO movie_studio (movie_id, studio_id) VALUES (%s,%s)", (movie_id, sid))
+                    # distribution table if territory/platform/date provided
+                    try:
+                        cursor.execute("INSERT INTO movie_distribution (movie_id, studio_id, platform_id, territory, distribution_date) VALUES (%s,%s,%s,%s,%s)", (movie_id, sid, None, territory_raw or None, distdate_norm))
+                    except Exception:
+                        pass
+                if platform_raw:
+                    cursor.execute("SELECT platform_id FROM streaming_platforms WHERE platform_name=%s", (platform_raw,))
+                    pres = cursor.fetchone()
+                    if pres:
+                        pid = pres[0]
+                    else:
+                        cursor.execute("INSERT INTO streaming_platforms (platform_name) VALUES (%s)", (platform_raw,))
+                        pid = cursor.lastrowid
+                    cursor.execute("SELECT 1 FROM movie_platform WHERE movie_id=%s AND platform_id=%s", (movie_id, pid))
+                    if not cursor.fetchone():
+                        cursor.execute("INSERT INTO movie_platform (movie_id, platform_id) VALUES (%s,%s)", (movie_id, pid))
+                    try:
+                        cursor.execute("INSERT INTO movie_distribution (movie_id, studio_id, platform_id, territory, distribution_date) VALUES (%s,%s,%s,%s,%s)", (movie_id, None, pid, territory_raw or None, distdate_norm))
+                    except Exception:
+                        pass
+
+                # If series, optionally insert an episode
+                if typ == 'series':
+                    try:
+                        season = int(season_e.get().strip()) if season_e.get().strip() else 1
+                    except:
+                        season = 1
+                    try:
+                        epnum = int(epnum_e.get().strip()) if epnum_e.get().strip() else None
+                    except:
+                        epnum = None
+                    eptitle = eptitle_e.get().strip() or None
+                    if epnum is not None:
+                        cursor.execute("SELECT episode_id FROM episodes WHERE movie_id=%s AND season_number=%s AND episode_number=%s", (movie_id, season, epnum))
+                        if cursor.fetchone():
+                            # already exists
+                            pass
+                        else:
+                            cursor.execute("INSERT INTO episodes (movie_id, episode_number, season_number, title, air_date) VALUES (%s,%s,%s,%s,%s)", (movie_id, epnum, season, eptitle, rdate))
+
+                conn.commit()
+                messagebox.showinfo('Success', f'{typ.title()} added successfully')
+                # clear form
+                title_e.delete(0, 'end')
+                date_e.delete(0, 'end')
+                lang_e.delete(0, 'end')
+                desc_e.delete('1.0', 'end')
+                new_genre_e.delete(0, 'end')
+                cast_e.delete(0, 'end')
+                season_e.delete(0, 'end')
+                epnum_e.delete(0, 'end')
+                eptitle_e.delete(0, 'end')
+                studio_e.delete(0, 'end')
+                platform_e.delete(0, 'end')
+                territory_e.delete(0, 'end')
+                distdate_e.delete(0, 'end')
+                status_lbl.configure(text='')
+            except Exception as e:
+                conn.rollback()
+                status_lbl.configure(text=f'Error: {e}')
+
+        btns = ctk.CTkFrame(form)
+        btns.grid(row=13, column=0, columnspan=4, pady=12)
+        ctk.CTkButton(btns, text='Add', fg_color=IMDB_YELLOW, command=do_add, width=140).pack(side='left', padx=6)
+        ctk.CTkButton(
+            btns,
+            text='Reset',
+            fg_color=IMDB_GRAY,
+            command=lambda: (
+                title_e.delete(0, 'end'),
+                date_e.delete(0, 'end'),
+                lang_e.delete(0, 'end'),
+                desc_e.delete('1.0', 'end'),
+                new_genre_e.delete(0, 'end'),
+                cast_e.delete(0, 'end'),
+                season_e.delete(0, 'end'),
+                epnum_e.delete(0, 'end'),
+                eptitle_e.delete(0, 'end'),
+                studio_e.delete(0, 'end'),
+                platform_e.delete(0, 'end'),
+                territory_e.delete(0, 'end'),
+                distdate_e.delete(0, 'end'),
+                status_lbl.configure(text='')
+            ),
+            width=140
+        ).pack(side='left', padx=6)
+
         # Watchlist action for series (same behavior as movies)
         wf = ctk.CTkFrame(self.page)
         wf.pack(anchor='e', padx=20, pady=(12,12))
@@ -2156,12 +2527,12 @@ class CineTrackIMDB(ctk.CTk):
         cursor.execute("SELECT COUNT(*) FROM users")
         total_users = cursor.fetchone()[0] or 0
         
-        # trigger_stats = ctk.CTkLabel(summary_frame, 
-        #                            text=f"🎯 Auto-Welcome Donations: {welcome_count} (Trigger Success Rate: {(welcome_count/max(total_users,1)*100):.1f}%)", 
-        #                            font=FONT_NORMAL, 
-        #                            text_color='lightgray', 
-        #                            bg_color=IMDB_DARK_BG)
-        # trigger_stats.pack(anchor='w', pady=(4,0))
+        trigger_stats = ctk.CTkLabel(summary_frame, 
+                                   text=f"🎯 Auto-Welcome Donations: {welcome_count} (Trigger Success Rate: {(welcome_count/max(total_users,1)*100):.1f}%)", 
+                                   font=FONT_NORMAL, 
+                                   text_color='lightgray', 
+                                   bg_color=IMDB_DARK_BG)
+        trigger_stats.pack(anchor='w', pady=(4,0))
 
         # Top donors
         donors_frame = ctk.CTkFrame(scrollable_frame, fg_color=IMDB_DARK_BG)
