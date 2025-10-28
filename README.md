@@ -143,7 +143,7 @@ The main navigation bar provides access to:
 ## 🔧 Configuration
 
 ### Database Connection
-Update the connection parameters in `p.py`:
+Update the connection parameters in `main.py`:
 ```python
 conn = mysql.connector.connect(
     host="localhost",        # Database host
