@@ -406,13 +406,21 @@ class CineTrackIMDB(ctk.CTk):
                 
                 self.current_user = (uid, uname)
                 self.account_btn.configure(text=uname)
-                dlg.destroy()
-                
-                # Show welcome message including trigger confirmation
+                # Show welcome message including trigger confirmation BEFORE closing dialog
                 if welcome_donation_exists:
                     messagebox.showinfo("Welcome!", f"Account created successfully!\n\n🎉 Welcome to CineTrack, {uname}!\nA welcome donation entry has been automatically created for you.")
                 else:
                     messagebox.showinfo("Welcome!", f"Account created successfully!\nWelcome to CineTrack, {uname}!")
+
+                # Close dialog and update status label
+                try:
+                    dlg.destroy()
+                except Exception:
+                    pass
+                try:
+                    status_lbl.configure(text='Registered and logged in')
+                except Exception:
+                    pass
                     
             except Exception as e:
                 conn.rollback()
@@ -505,13 +513,17 @@ class CineTrackIMDB(ctk.CTk):
                 
                 self.current_user = (uid, uname)
                 self.account_btn.configure(text=uname)
-                
+                # Show welcome message before navigating away from the page
                 if welcome_donation_exists:
                     messagebox.showinfo('Welcome!', f'Account created and logged in!\n\n🎉 Welcome to CineTrack, {uname}!\nA welcome donation entry has been automatically created for you.')
                 else:
-                    messagebox.showinfo('Register', 'Account created and logged in')
-                    
-                self.show_home()
+                    messagebox.showinfo('Register', f'Account created and logged in. Welcome, {uname}!')
+
+                # Navigate to home after notifying the user
+                try:
+                    self.show_home()
+                except Exception:
+                    pass
                 
             except Exception as e:
                 conn.rollback()
