@@ -1538,6 +1538,94 @@ class CineTrackIMDB(ctk.CTk):
         ctk.CTkLabel(self.page, text="User Reviews:", font=FONT_SUBHEADER, text_color=IMDB_YELLOW, bg_color=IMDB_DARK_BG).pack(anchor="w", padx=20, pady=(32,4))
         review_frame = ctk.CTkFrame(self.page, fg_color=IMDB_DARK_BG)
         review_frame.pack(anchor="w", padx=20)
+
+        # Button row: Add Comment (opens a small modal)
+        btn_row = ctk.CTkFrame(review_frame, fg_color=IMDB_DARK_BG)
+        btn_row.pack(anchor='w', fill='x', pady=(0,8))
+
+        def open_comment_dialog():
+            # Require login
+            if not self.current_user:
+                messagebox.showinfo("Login required", "Please login to add a comment.")
+                return
+
+            dlg = ctk.CTkToplevel(self)
+            dlg.title("Add Comment")
+            dlg.geometry("480x300")
+
+            ctk.CTkLabel(dlg, text=f"Add comment for: {row[0]}", font=FONT_SUBHEADER, text_color=IMDB_YELLOW).pack(pady=(12,6))
+            frm = ctk.CTkFrame(dlg)
+            frm.pack(padx=12, pady=6, fill='both', expand=True)
+
+            ctk.CTkLabel(frm, text="Rating (1-10):").grid(row=0, column=0, sticky='w')
+            rating_e = ctk.CTkEntry(frm, width=120)
+            rating_e.grid(row=0, column=1, pady=6, sticky='w')
+
+            ctk.CTkLabel(frm, text="Comment:").grid(row=1, column=0, sticky='nw')
+            # Use CTkTextbox if available, otherwise fallback to CTkEntry
+            try:
+                comment_tb = ctk.CTkTextbox(frm, width=320, height=120)
+                comment_tb.grid(row=1, column=1, pady=6, sticky='w')
+            except Exception:
+                comment_tb = ctk.CTkEntry(frm, width=320)
+                comment_tb.grid(row=1, column=1, pady=6, sticky='w')
+
+            status_lbl = ctk.CTkLabel(frm, text="", text_color='white')
+            status_lbl.grid(row=2, column=0, columnspan=2, pady=(6,0))
+
+            def do_submit():
+                # get values
+                rating_raw = rating_e.get().strip()
+                try:
+                    rating = int(rating_raw)
+                    if rating < 1 or rating > 10:
+                        raise ValueError()
+                except Exception:
+                    status_lbl.configure(text='Enter a valid rating 1-10')
+                    return
+                # Safely retrieve comment text from either CTkTextbox (Text-like) or CTkEntry (single-line)
+                comment = ''
+                if hasattr(comment_tb, 'get'):
+                    try:
+                        # CTkTextbox / Text widget expects start,end
+                        comment = comment_tb.get("1.0", "end").strip()
+                    except TypeError:
+                        # CTkEntry or other widgets use no-arg get()
+                        try:
+                            comment = comment_tb.get().strip()
+                        except Exception:
+                            comment = ''
+                    except Exception:
+                        # any other unexpected error, fallback to empty
+                        comment = ''
+
+                try:
+                    cursor.execute("INSERT INTO reviews_ratings (user_id, movie_id, rating, comment, review_date) VALUES (%s,%s,%s,%s,NOW())",
+                                   (self.current_user[0], movie_id, rating, comment))
+                    conn.commit()
+                except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    status_lbl.configure(text=f'Failed to save: {e}')
+                    return
+
+                # insert into treeview at top
+                try:
+                    rtree.insert('', 0, values=(self.current_user[1], rating, comment), tags=('even',))
+                except Exception:
+                    pass
+
+                messagebox.showinfo('Success', 'Comment added')
+                dlg.destroy()
+
+            submit_btn = ctk.CTkButton(frm, text='Submit', fg_color=IMDB_YELLOW, command=do_submit)
+            submit_btn.grid(row=3, column=0, columnspan=2, pady=(8,0))
+
+        add_btn = ctk.CTkButton(btn_row, text='Add comment', fg_color=IMDB_YELLOW, command=open_comment_dialog, width=140)
+        add_btn.pack(side='left', padx=(0,8))
+
         rev_cols = ("User", "Rating", "Comment")
         rtree = ttk.Treeview(review_frame, columns=rev_cols, show="headings", height=8)
         for col in rev_cols:
